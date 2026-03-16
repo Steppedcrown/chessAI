@@ -135,6 +135,13 @@ std::array<int, 64> applyMoveToBoard(const std::array<int, 64> &board, const Bit
     auto next = board;
     next[move.to] = next[move.from];
     next[move.from] = 0;
+    if (move.isCastle) {
+        // Also move the rook
+        if (move.from == 4 && move.to == 6)       { next[5] = next[7]; next[7] = 0; }  // white kingside
+        else if (move.from == 4 && move.to == 2)  { next[3] = next[0]; next[0] = 0; }  // white queenside
+        else if (move.from == 60 && move.to == 62){ next[61] = next[63]; next[63] = 0; }// black kingside
+        else if (move.from == 60 && move.to == 58){ next[59] = next[56]; next[56] = 0; }// black queenside
+    }
     return next;
 }
 
@@ -286,7 +293,11 @@ void Chess::setUpBoard()
     _gameOptions.rowY = 8;
 
     _grid->initializeChessSquares(pieceSize, "boardsquare.png");
-    FENtoBoard("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR");
+
+    _canCastleKingSide[0] = _canCastleKingSide[1] = true;
+    _canCastleQueenSide[0] = _canCastleQueenSide[1] = true;
+
+    FENtoBoard("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -");
 
     _moveList.clear();
     _moveCount = 0;
@@ -307,6 +318,20 @@ void Chess::FENtoBoard(const std::string& fen) {
 
     // Extract piece placement portion (stop at first space for full FEN strings)
     std::string placement = fen.substr(0, fen.find(' '));
+
+    // Parse castling availability (3rd FEN field, e.g. "KQkq" or "-")
+    size_t sp1 = fen.find(' ');
+    if (sp1 != std::string::npos) {
+        size_t sp2 = fen.find(' ', sp1 + 1);
+        if (sp2 != std::string::npos) {
+            size_t sp3 = fen.find(' ', sp2 + 1);
+            std::string castling = fen.substr(sp2 + 1, sp3 == std::string::npos ? std::string::npos : sp3 - sp2 - 1);
+            _canCastleKingSide[0]  = castling.find('K') != std::string::npos;
+            _canCastleQueenSide[0] = castling.find('Q') != std::string::npos;
+            _canCastleKingSide[1]  = castling.find('k') != std::string::npos;
+            _canCastleQueenSide[1] = castling.find('q') != std::string::npos;
+        }
+    }
 
     int rankIdx = 0; // 0 = rank 8 (black's back rank), 7 = rank 1 (white's back rank)
     int fileIdx = 0; // 0 = file a, 7 = file h
@@ -376,6 +401,46 @@ void Chess::bitMovedFromTo(Bit &bit, BitHolder &src, BitHolder &dst)
     if (movedPiece != '0') {
         _moveList.push_back(movedPiece);
         _moveCount = static_cast<int>(_moveList.size());
+    }
+
+    int pieceType = bit.gameTag() & 0x7F;
+    int player    = (bit.gameTag() >= 128) ? 1 : 0;
+    ChessSquare* srcSq = static_cast<ChessSquare*>(&src);
+    ChessSquare* dstSq = static_cast<ChessSquare*>(&dst);
+
+    if (pieceType == King) {
+        // Revoke all castling rights for this player
+        _canCastleKingSide[player]  = false;
+        _canCastleQueenSide[player] = false;
+
+        // If king moved 2 squares horizontally it was a castle — move the rook too
+        int srcCol = srcSq->getColumn();
+        int dstCol = dstSq->getColumn();
+        int row    = dstSq->getRow();
+        if (srcCol == 4 && abs(dstCol - srcCol) == 2) {
+            int rookFromCol = (dstCol == 6) ? 7 : 0;
+            int rookToCol   = (dstCol == 6) ? 5 : 3;
+            ChessSquare* rookSrcSq = _grid->getSquare(rookFromCol, row);
+            ChessSquare* rookDstSq = _grid->getSquare(rookToCol,   row);
+            Bit* rook = rookSrcSq->bit();
+            if (rook) {
+                // Change parent BEFORE setBit(nullptr) so BitHolder::setBit
+                // won't delete the rook (it checks parent ownership first).
+                rook->setParent(rookDstSq);
+                rookSrcSq->setBit(nullptr);
+                rookDstSq->setBit(rook);
+                rook->moveTo(rookDstSq->getPosition());
+            }
+        }
+    } else if (pieceType == Rook) {
+        // Revoke castling right for the rook that just moved
+        int homeRow = (player == 0) ? 0 : 7;
+        int col     = srcSq->getColumn();
+        int row     = srcSq->getRow();
+        if (row == homeRow) {
+            if (col == 7) _canCastleKingSide[player]  = false;
+            if (col == 0) _canCastleQueenSide[player] = false;
+        }
     }
 
     Game::bitMovedFromTo(bit, src, dst);
@@ -657,6 +722,44 @@ std::vector<BitMove> Chess::generateAllMoves()
                 allMoves.emplace_back(candidate);
             }
         });
+
+        // Generate castling moves for the king
+        if (pieceType == King) {
+            auto board = buildBoardArray(this);
+            int player = currentPlayer;
+            int expectedKingSq = (player == 0) ? 4 : 60;
+
+            if (srcIndex == expectedKingSq && !isInCheck(board, player)) {
+                int rookTag = (player == 0) ? Rook : 128 + Rook;
+
+                // Kingside: squares between king (e) and rook (h) must be empty; king passes f then lands g
+                if (_canCastleKingSide[player]) {
+                    int rookSq = (player == 0) ? 7  : 63;
+                    int passSq = (player == 0) ? 5  : 61;  // f-file (king passes through)
+                    int dstSq  = (player == 0) ? 6  : 62;  // g-file (king lands)
+                    if (board[rookSq] == rookTag && board[passSq] == 0 && board[dstSq] == 0 &&
+                        !isSquareAttacked(board, passSq, 1 - player)) {
+                        BitMove cm(srcIndex, dstSq, King);
+                        cm.isCastle = true;
+                        if (isLegalMove(this, cm)) allMoves.emplace_back(cm);
+                    }
+                }
+
+                // Queenside: b, c, d squares empty; king passes d then lands c
+                if (_canCastleQueenSide[player]) {
+                    int rookSq = (player == 0) ? 0  : 56;
+                    int dSq    = (player == 0) ? 3  : 59;  // d-file (king passes through)
+                    int dstSq  = (player == 0) ? 2  : 58;  // c-file (king lands)
+                    int bSq    = (player == 0) ? 1  : 57;  // b-file (must be empty, rook path)
+                    if (board[rookSq] == rookTag && board[dSq] == 0 && board[dstSq] == 0 && board[bSq] == 0 &&
+                        !isSquareAttacked(board, dSq, 1 - player)) {
+                        BitMove cm(srcIndex, dstSq, King);
+                        cm.isCastle = true;
+                        if (isLegalMove(this, cm)) allMoves.emplace_back(cm);
+                    }
+                }
+            }
+        }
     });
 
     return allMoves;

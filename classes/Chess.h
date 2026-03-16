@@ -49,4 +49,6 @@ private:
     Grid* _grid;
     std::vector<char> _moveList;
     int _moveCount = 0;
+    bool _canCastleKingSide[2];
+    bool _canCastleQueenSide[2];
 };

@@ -16,6 +16,7 @@ Finish the chess program so it supports full legal chess movement rules (checks,
   - there are no legal moves that escape check.
 
 ### ✅ Step 3: Castling (king-side and queen-side)
+- Update FEN string for castling
 - Add castling rights tracking (per side): `canCastleKingSide`, `canCastleQueenSide`.
 - Update rights when king or rook moves (or rook is captured).
 - Generate castle moves only if:

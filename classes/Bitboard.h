@@ -84,15 +84,16 @@ struct BitMove {
     uint8_t from;
     uint8_t to;
     uint8_t piece;
-    
+    bool isCastle = false;
+
     BitMove(int from, int to, ChessPiece piece)
-        : from(from), to(to), piece(piece) { }
-        
-    BitMove() : from(0), to(0), piece(NoPiece) { }
-    
+        : from(from), to(to), piece(piece), isCastle(false) { }
+
+    BitMove() : from(0), to(0), piece(NoPiece), isCastle(false) { }
+
     bool operator==(const BitMove& other) const {
-        return from == other.from && 
-               to == other.to && 
+        return from == other.from &&
+               to == other.to &&
                piece == other.piece;
     }
 };
