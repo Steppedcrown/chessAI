@@ -1,6 +1,246 @@
 #include "Chess.h"
+#include <array>
 #include <limits>
 #include <cmath>
+
+namespace {
+
+inline bool isWhiteTag(int tag) { return tag > 0 && tag < 128; }
+inline bool isBlackTag(int tag) { return tag >= 128; }
+inline bool isSameColor(int tag, int player) { return player == 0 ? isWhiteTag(tag) : isBlackTag(tag); }
+inline bool isOpponentColor(int tag, int player) { return player == 0 ? isBlackTag(tag) : isWhiteTag(tag); }
+inline int pieceTypeFromTag(int tag) {
+    if (tag == 0) return 0;
+    if (tag < 128) return tag;
+    return tag - 128;
+}
+
+inline bool onBoard(int x, int y) { return x >= 0 && x < 8 && y >= 0 && y < 8; }
+inline int squareIndex(int x, int y) { return y * 8 + x; }
+
+std::array<int, 64> buildBoardArray(Chess *chess)
+{
+    std::array<int, 64> board;
+    board.fill(0);
+    Grid *grid = chess->getGrid();
+    grid->forEachSquare([&](ChessSquare *sq, int x, int y) {
+        Bit *bit = sq->bit();
+        int idx = squareIndex(x, y);
+        if (!bit) return;
+        board[idx] = bit->gameTag();
+    });
+    return board;
+}
+
+int findKingSquare(const std::array<int, 64> &board, int player)
+{
+    int targetTag = (player == 0) ? King : 128 + King;
+    for (int i = 0; i < 64; ++i) {
+        if (board[i] == targetTag) return i;
+    }
+    return -1;
+}
+
+bool isSquareAttacked(const std::array<int, 64> &board, int square, int attacker)
+{
+    int tx = square % 8;
+    int ty = square / 8;
+
+    // Pawn attacks (white pawns attack "up" (+y), black pawns attack "down" (-y))
+    if (attacker == 0) {
+        int dy = 1;
+        for (int dx : {-1, 1}) {
+            int sx = tx + dx;
+            int sy = ty + dy;
+            if (!onBoard(sx, sy)) continue;
+            int si = squareIndex(sx, sy);
+            if (board[si] == Pawn) return true;
+        }
+    } else {
+        int dy = -1;
+        for (int dx : {-1, 1}) {
+            int sx = tx + dx;
+            int sy = ty + dy;
+            if (!onBoard(sx, sy)) continue;
+            int si = squareIndex(sx, sy);
+            if (board[si] == 128 + Pawn) return true;
+        }
+    }
+
+    // Knight attacks
+    const int knightOff[8][2] = {{1,2},{2,1},{2,-1},{1,-2},{-1,-2},{-2,-1},{-2,1},{-1,2}};
+    for (auto &o : knightOff) {
+        int sx = tx + o[0];
+        int sy = ty + o[1];
+        if (!onBoard(sx, sy)) continue;
+        int si = squareIndex(sx, sy);
+        int tag = board[si];
+        if (tag == (attacker == 0 ? Knight : 128 + Knight)) return true;
+    }
+
+    // King attacks
+    const int kingOff[8][2] = {{0,1},{1,1},{1,0},{1,-1},{0,-1},{-1,-1},{-1,0},{-1,1}};
+    for (auto &o : kingOff) {
+        int sx = tx + o[0];
+        int sy = ty + o[1];
+        if (!onBoard(sx, sy)) continue;
+        int si = squareIndex(sx, sy);
+        int tag = board[si];
+        if (tag == (attacker == 0 ? King : 128 + King)) return true;
+    }
+
+    // Sliding pieces
+    const int rookDirs[4][2] = {{0,1},{0,-1},{1,0},{-1,0}};
+    const int bishopDirs[4][2] = {{1,1},{1,-1},{-1,1},{-1,-1}};
+
+    auto checkRay = [&](int dx, int dy, int rookTag, int bishopTag, int queenTag) {
+        int sx = tx + dx;
+        int sy = ty + dy;
+        while (onBoard(sx, sy)) {
+            int si = squareIndex(sx, sy);
+            int tag = board[si];
+            if (tag != 0) {
+                if (tag == rookTag || tag == bishopTag || tag == queenTag) return true;
+                break;
+            }
+            sx += dx;
+            sy += dy;
+        }
+        return false;
+    };
+
+    int rookTag = (attacker == 0 ? Rook : 128 + Rook);
+    int bishopTag = (attacker == 0 ? Bishop : 128 + Bishop);
+    int queenTag = (attacker == 0 ? Queen : 128 + Queen);
+
+    for (auto &d : rookDirs) {
+        if (checkRay(d[0], d[1], rookTag, -1, queenTag)) return true;
+    }
+    for (auto &d : bishopDirs) {
+        if (checkRay(d[0], d[1], -1, bishopTag, queenTag)) return true;
+    }
+
+    return false;
+}
+
+bool isInCheck(const std::array<int, 64> &board, int player)
+{
+    int kingSquare = findKingSquare(board, player);
+    if (kingSquare < 0) return false;
+    return isSquareAttacked(board, kingSquare, 1 - player);
+}
+
+std::array<int, 64> applyMoveToBoard(const std::array<int, 64> &board, const BitMove &move)
+{
+    auto next = board;
+    next[move.to] = next[move.from];
+    next[move.from] = 0;
+    return next;
+}
+
+bool isLegalMove(Chess *chess, const BitMove &move)
+{
+    int player = chess->getCurrentPlayer()->playerNumber();
+    auto board = buildBoardArray(chess);
+    auto next = applyMoveToBoard(board, move);
+    return !isInCheck(next, player);
+}
+
+bool hasLegalMove(Chess *chess, int player)
+{
+    auto board = buildBoardArray(chess);
+
+    for (int from = 0; from < 64; ++from) {
+        int tag = board[from];
+        if (!isSameColor(tag, player)) continue;
+        int type = pieceTypeFromTag(tag);
+        int fx = from % 8;
+        int fy = from / 8;
+
+        auto tryMove = [&](int tx, int ty) {
+            if (!onBoard(tx, ty)) return false;
+            int to = squareIndex(tx, ty);
+            int dest = board[to];
+            if (isSameColor(dest, player)) return false;
+            auto next = applyMoveToBoard(board, BitMove(from, to, static_cast<ChessPiece>(type)));
+            if (!isInCheck(next, player)) return true;
+            return false;
+        };
+
+        if (type == Pawn) {
+            int dir = (player == 0 ? 1 : -1);
+            // push
+            if (onBoard(fx, fy + dir) && board[squareIndex(fx, fy + dir)] == 0) {
+                if (tryMove(fx, fy + dir)) return true;
+            }
+            for (int dx : {-1, 1}) {
+                int tx = fx + dx;
+                int ty = fy + dir;
+                if (!onBoard(tx, ty)) continue;
+                int tgt = board[squareIndex(tx, ty)];
+                if (tgt != 0 && isOpponentColor(tgt, player)) {
+                    if (tryMove(tx, ty)) return true;
+                }
+            }
+        } else if (type == Knight) {
+            const int offsets[8][2] = {{1,2},{2,1},{2,-1},{1,-2},{-1,-2},{-2,-1},{-2,1},{-1,2}};
+            for (auto &o : offsets) {
+                if (tryMove(fx + o[0], fy + o[1])) return true;
+            }
+        } else if (type == Bishop) {
+            const int dirs[4][2] = {{1,1},{1,-1},{-1,1},{-1,-1}};
+            for (auto &d : dirs) {
+                int tx = fx + d[0];
+                int ty = fy + d[1];
+                while (onBoard(tx, ty)) {
+                    int dest = board[squareIndex(tx, ty)];
+                    if (isSameColor(dest, player)) break;
+                    if (tryMove(tx, ty)) return true;
+                    if (dest != 0) break;
+                    tx += d[0];
+                    ty += d[1];
+                }
+            }
+        } else if (type == Rook) {
+            const int dirs[4][2] = {{0,1},{0,-1},{1,0},{-1,0}};
+            for (auto &d : dirs) {
+                int tx = fx + d[0];
+                int ty = fy + d[1];
+                while (onBoard(tx, ty)) {
+                    int dest = board[squareIndex(tx, ty)];
+                    if (isSameColor(dest, player)) break;
+                    if (tryMove(tx, ty)) return true;
+                    if (dest != 0) break;
+                    tx += d[0];
+                    ty += d[1];
+                }
+            }
+        } else if (type == Queen) {
+            const int dirs[8][2] = {{0,1},{0,-1},{1,0},{-1,0},{1,1},{1,-1},{-1,1},{-1,-1}};
+            for (auto &d : dirs) {
+                int tx = fx + d[0];
+                int ty = fy + d[1];
+                while (onBoard(tx, ty)) {
+                    int dest = board[squareIndex(tx, ty)];
+                    if (isSameColor(dest, player)) break;
+                    if (tryMove(tx, ty)) return true;
+                    if (dest != 0) break;
+                    tx += d[0];
+                    ty += d[1];
+                }
+            }
+        } else if (type == King) {
+            const int offsets[8][2] = {{0,1},{1,1},{1,0},{1,-1},{0,-1},{-1,-1},{-1,0},{-1,1}};
+            for (auto &o : offsets) {
+                if (tryMove(fx + o[0], fy + o[1])) return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+} // namespace
 
 Chess::Chess()
 {
@@ -322,12 +562,25 @@ Player* Chess::ownerAt(int x, int y) const
 
 Player* Chess::checkForWinner()
 {
+    int player = getCurrentPlayer()->playerNumber();
+    auto board = buildBoardArray(this);
+    bool inCheck = isInCheck(board, player);
+    bool hasMove = hasLegalMove(this, player);
+
+    if (!hasMove && inCheck) {
+        // Checkmate: current player has no legal move and is in check
+        return getPlayerAt(1 - player);
+    }
     return nullptr;
 }
 
 bool Chess::checkForDraw()
 {
-    return false;
+    int player = getCurrentPlayer()->playerNumber();
+    auto board = buildBoardArray(this);
+    bool inCheck = isInCheck(board, player);
+    bool hasMove = hasLegalMove(this, player);
+    return (!hasMove && !inCheck);
 }
 
 std::string Chess::initialStateString()
@@ -399,7 +652,10 @@ std::vector<BitMove> Chess::generateAllMoves()
         // Convert bitboard moves to BitMove objects
         int srcIndex = srcSquare->getSquareIndex();
         moves.forEachBit([&](int dstIndex) {
-            allMoves.emplace_back(srcIndex, dstIndex, static_cast<ChessPiece>(pieceType));
+            BitMove candidate(srcIndex, dstIndex, static_cast<ChessPiece>(pieceType));
+            if (isLegalMove(this, candidate)) {
+                allMoves.emplace_back(candidate);
+            }
         });
     });
 
