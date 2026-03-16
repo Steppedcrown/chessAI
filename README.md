@@ -1,2 +1,3 @@
-# chessAI
+This chess implementation supports FEN string board setup via `FENtoBoard()`, which parses the piece placement portion of a FEN string (e.g. `"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"`) and accepts either just the board position or a full FEN string with additional fields like active color, castling rights, and en passant target — the extra fields are currently ignored. Piece movement is implemented using bitboards: pawns use dedicated logic for single/double pushes and diagonal captures, knights and kings use a jump-offset system that checks all fixed offsets and filters out friendly-occupied squares, and sliding pieces (bishops, rooks, queens) cast rays in their legal directions and stop on the first blocker — landing on an enemy square to capture it or stopping short of a friendly piece.
 
+*Note: this project was developed with generative AI assistance.*
