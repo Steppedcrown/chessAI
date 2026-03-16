@@ -142,6 +142,11 @@ std::array<int, 64> applyMoveToBoard(const std::array<int, 64> &board, const Bit
         else if (move.from == 60 && move.to == 62){ next[61] = next[63]; next[63] = 0; }// black kingside
         else if (move.from == 60 && move.to == 58){ next[59] = next[56]; next[56] = 0; }// black queenside
     }
+    if (move.isEnPassant) {
+        // Remove the captured pawn: same file as destination, same rank as source
+        int capturedSq = (move.from / 8) * 8 + (move.to % 8);
+        next[capturedSq] = 0;
+    }
     return next;
 }
 
@@ -296,6 +301,7 @@ void Chess::setUpBoard()
 
     _canCastleKingSide[0] = _canCastleKingSide[1] = true;
     _canCastleQueenSide[0] = _canCastleQueenSide[1] = true;
+    _enPassantSquare = -1;
 
     FENtoBoard("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -");
 
@@ -319,7 +325,7 @@ void Chess::FENtoBoard(const std::string& fen) {
     // Extract piece placement portion (stop at first space for full FEN strings)
     std::string placement = fen.substr(0, fen.find(' '));
 
-    // Parse castling availability (3rd FEN field, e.g. "KQkq" or "-")
+    // Parse castling availability (3rd FEN field) and en passant target (4th FEN field)
     size_t sp1 = fen.find(' ');
     if (sp1 != std::string::npos) {
         size_t sp2 = fen.find(' ', sp1 + 1);
@@ -330,6 +336,18 @@ void Chess::FENtoBoard(const std::string& fen) {
             _canCastleQueenSide[0] = castling.find('Q') != std::string::npos;
             _canCastleKingSide[1]  = castling.find('k') != std::string::npos;
             _canCastleQueenSide[1] = castling.find('q') != std::string::npos;
+
+            if (sp3 != std::string::npos) {
+                size_t sp4 = fen.find(' ', sp3 + 1);
+                std::string ep = fen.substr(sp3 + 1, sp4 == std::string::npos ? std::string::npos : sp4 - sp3 - 1);
+                if (ep.size() >= 2 && ep[0] != '-') {
+                    int epFile = ep[0] - 'a';
+                    int epRank = ep[1] - '1';
+                    _enPassantSquare = epRank * 8 + epFile;
+                } else {
+                    _enPassantSquare = -1;
+                }
+            }
         }
     }
 
@@ -408,20 +426,22 @@ void Chess::bitMovedFromTo(Bit &bit, BitHolder &src, BitHolder &dst)
     ChessSquare* srcSq = static_cast<ChessSquare*>(&src);
     ChessSquare* dstSq = static_cast<ChessSquare*>(&dst);
 
+    int srcCol = srcSq->getColumn();
+    int dstCol = dstSq->getColumn();
+    int srcRow = srcSq->getRow();
+    int dstRow = dstSq->getRow();
+
     if (pieceType == King) {
         // Revoke all castling rights for this player
         _canCastleKingSide[player]  = false;
         _canCastleQueenSide[player] = false;
 
         // If king moved 2 squares horizontally it was a castle — move the rook too
-        int srcCol = srcSq->getColumn();
-        int dstCol = dstSq->getColumn();
-        int row    = dstSq->getRow();
         if (srcCol == 4 && abs(dstCol - srcCol) == 2) {
             int rookFromCol = (dstCol == 6) ? 7 : 0;
             int rookToCol   = (dstCol == 6) ? 5 : 3;
-            ChessSquare* rookSrcSq = _grid->getSquare(rookFromCol, row);
-            ChessSquare* rookDstSq = _grid->getSquare(rookToCol,   row);
+            ChessSquare* rookSrcSq = _grid->getSquare(rookFromCol, dstRow);
+            ChessSquare* rookDstSq = _grid->getSquare(rookToCol,   dstRow);
             Bit* rook = rookSrcSq->bit();
             if (rook) {
                 // Change parent BEFORE setBit(nullptr) so BitHolder::setBit
@@ -435,12 +455,24 @@ void Chess::bitMovedFromTo(Bit &bit, BitHolder &src, BitHolder &dst)
     } else if (pieceType == Rook) {
         // Revoke castling right for the rook that just moved
         int homeRow = (player == 0) ? 0 : 7;
-        int col     = srcSq->getColumn();
-        int row     = srcSq->getRow();
-        if (row == homeRow) {
-            if (col == 7) _canCastleKingSide[player]  = false;
-            if (col == 0) _canCastleQueenSide[player] = false;
+        if (srcRow == homeRow) {
+            if (srcCol == 7) _canCastleKingSide[player]  = false;
+            if (srcCol == 0) _canCastleQueenSide[player] = false;
         }
+    } else if (pieceType == Pawn) {
+        // En passant capture: pawn moved diagonally to the en passant target square
+        if (srcCol != dstCol && dstSq->getSquareIndex() == _enPassantSquare) {
+            // The captured pawn sits on the same file as dst, same rank as src
+            ChessSquare* capturedSq = _grid->getSquare(dstCol, srcRow);
+            capturedSq->destroyBit();
+        }
+    }
+
+    // Update en passant square: set it only on a double pawn push, clear otherwise
+    if (pieceType == Pawn && abs(dstRow - srcRow) == 2) {
+        _enPassantSquare = ((srcRow + dstRow) / 2) * 8 + srcCol;
+    } else {
+        _enPassantSquare = -1;
     }
 
     Game::bitMovedFromTo(bit, src, dst);
@@ -630,7 +662,7 @@ Player* Chess::checkForWinner()
     int player = getCurrentPlayer()->playerNumber();
     auto board = buildBoardArray(this);
     bool inCheck = isInCheck(board, player);
-    bool hasMove = hasLegalMove(this, player);
+    bool hasMove = !generateAllMoves().empty();
 
     if (!hasMove && inCheck) {
         // Checkmate: current player has no legal move and is in check
@@ -644,7 +676,7 @@ bool Chess::checkForDraw()
     int player = getCurrentPlayer()->playerNumber();
     auto board = buildBoardArray(this);
     bool inCheck = isInCheck(board, player);
-    bool hasMove = hasLegalMove(this, player);
+    bool hasMove = !generateAllMoves().empty();
     return (!hasMove && !inCheck);
 }
 
@@ -722,6 +754,18 @@ std::vector<BitMove> Chess::generateAllMoves()
                 allMoves.emplace_back(candidate);
             }
         });
+
+        // En passant capture for pawns
+        if (pieceType == Pawn && _enPassantSquare >= 0) {
+            int epX = _enPassantSquare % 8;
+            int epY = _enPassantSquare / 8;
+            int dir = (currentPlayer == 0) ? 1 : -1;
+            if (epY == srcY + dir && abs(epX - srcX) == 1) {
+                BitMove epMove(srcIndex, _enPassantSquare, Pawn);
+                epMove.isEnPassant = true;
+                if (isLegalMove(this, epMove)) allMoves.emplace_back(epMove);
+            }
+        }
 
         // Generate castling moves for the king
         if (pieceType == King) {

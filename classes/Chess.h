@@ -51,4 +51,5 @@ private:
     int _moveCount = 0;
     bool _canCastleKingSide[2];
     bool _canCastleQueenSide[2];
+    int _enPassantSquare;
 };
