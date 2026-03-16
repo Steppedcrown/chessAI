@@ -24,6 +24,7 @@ public:
     void onBitPickedUp(Bit& bit, BitHolder& src) override;
     void clearBoardHighlights() override;
 
+    void drawFrame() override;
     void stopGame() override;
 
     Player *checkForWinner() override;
@@ -48,6 +49,7 @@ public:
 
 private:
     void applyAIMove(const BitMove& move);
+    void promotePawn(int square, int player, ChessPiece piece);
 
     Bit* PieceForPlayer(const int playerNumber, ChessPiece piece);
     Player* ownerAt(int x, int y) const;
@@ -64,4 +66,7 @@ private:
     bool _canCastleKingSide[2];
     bool _canCastleQueenSide[2];
     int _enPassantSquare;
+    bool _promotionPending = false;
+    int  _promotionSquare  = -1;
+    int  _promotionPlayer  = -1;
 };

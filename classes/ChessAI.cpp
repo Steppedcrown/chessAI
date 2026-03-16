@@ -334,6 +334,41 @@ int ChessAI::evaluate(const State& state)
     return score;
 }
 
+// ---- move ordering ----------------------------------------------------------
+
+// MVV-LVA: prefer capturing high-value pieces with low-value pieces.
+// Promotions and en passant captures are also boosted.
+int ChessAI::moveScore(const BitMove& move, const State& state)
+{
+    int score = 0;
+
+    // Regular capture: 10 * victim value - attacker value
+    int victim = state.board[move.to];
+    if (victim) {
+        int vtype = victim >= 128 ? victim - 128 : victim;
+        int atype = state.board[move.from] >= 128 ? state.board[move.from] - 128 : state.board[move.from];
+        score += 10 * pieceValue(vtype) - pieceValue(atype);
+    }
+
+    // En passant: pawn captures pawn
+    if (move.isEnPassant)
+        score += 10 * pieceValue(Pawn) - pieceValue(Pawn);
+
+    // Promotion: reward the material gain
+    int toY = move.to / 8;
+    if (move.piece == Pawn && (toY == 7 || toY == 0))
+        score += pieceValue(Queen) - pieceValue(Pawn);
+
+    return score;
+}
+
+void ChessAI::orderMoves(std::vector<BitMove>& moves, const State& state)
+{
+    std::sort(moves.begin(), moves.end(), [&](const BitMove& a, const BitMove& b) {
+        return moveScore(a, state) > moveScore(b, state);
+    });
+}
+
 // ---- negamax ----------------------------------------------------------------
 
 int ChessAI::negamax(const State& state, int depth, int alpha, int beta)
@@ -343,10 +378,11 @@ int ChessAI::negamax(const State& state, int depth, int alpha, int beta)
     auto moves = generateMoves(state);
 
     if (moves.empty()) {
-        // Checkmate scores further mates lower to prefer faster wins
         if (isInCheck(state.board, state.sideToMove)) return -20000 - depth;
         return 0; // stalemate
     }
+
+    orderMoves(moves, state);
 
     for (const auto& move : moves) {
         int score = -negamax(applyMove(state, move), depth - 1, -beta, -alpha);
@@ -364,7 +400,10 @@ BitMove ChessAI::getBestMove(const State& state, int depth)
     int alpha = std::numeric_limits<int>::min() + 1;
     int beta  = std::numeric_limits<int>::max();
 
-    for (const auto& move : generateMoves(state)) {
+    auto moves = generateMoves(state);
+    orderMoves(moves, state);
+
+    for (const auto& move : moves) {
         int score = -negamax(applyMove(state, move), depth - 1, -beta, -alpha);
         if (score > alpha) {
             alpha = score;

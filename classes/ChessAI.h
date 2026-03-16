@@ -33,6 +33,8 @@ private:
     static bool isSquareAttacked(const std::array<int,64>& board, int square, int attacker);
     static bool isInCheck(const std::array<int,64>& board, int player);
     static int  negamax(const State& state, int depth, int alpha, int beta);
+    static void orderMoves(std::vector<BitMove>& moves, const State& state);
+    static int  moveScore(const BitMove& move, const State& state);
     static int  pieceValue(int pieceType);
     static int  pstValue(int pieceType, int pstIdx);
 

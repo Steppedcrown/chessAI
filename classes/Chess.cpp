@@ -1,5 +1,6 @@
 #include "Chess.h"
 #include "ChessAI.h"
+#include "../imgui/imgui.h"
 #include <array>
 #include <limits>
 #include <cmath>
@@ -308,7 +309,7 @@ void Chess::setUpBoard()
 
     _moveList.clear();
     _moveCount = 0;
-    _gameOptions.AIMAXDepth = 3;
+    _gameOptions.AIMAXDepth = 6;
 
     startGame();
 }
@@ -464,9 +465,21 @@ void Chess::bitMovedFromTo(Bit &bit, BitHolder &src, BitHolder &dst)
     } else if (pieceType == Pawn) {
         // En passant capture: pawn moved diagonally to the en passant target square
         if (srcCol != dstCol && dstSq->getSquareIndex() == _enPassantSquare) {
-            // The captured pawn sits on the same file as dst, same rank as src
             ChessSquare* capturedSq = _grid->getSquare(dstCol, srcRow);
             capturedSq->destroyBit();
+        }
+
+        // Promotion: pawn reached the back rank
+        bool isPromotion = (player == 0 && dstRow == 7) || (player == 1 && dstRow == 0);
+        if (isPromotion) {
+            bool isAIMove = _gameOptions.AIPlaying && (player == _gameOptions.AIPlayer);
+            if (isAIMove) {
+                promotePawn(dstSq->getSquareIndex(), player, Queen);
+            } else {
+                _promotionPending = true;
+                _promotionSquare  = dstSq->getSquareIndex();
+                _promotionPlayer  = player;
+            }
         }
     }
 
@@ -476,6 +489,9 @@ void Chess::bitMovedFromTo(Bit &bit, BitHolder &src, BitHolder &dst)
     } else {
         _enPassantSquare = -1;
     }
+
+    // Defer endTurn until the player picks a promotion piece
+    if (_promotionPending) return;
 
     Game::bitMovedFromTo(bit, src, dst);
 }
@@ -500,7 +516,7 @@ std::array<int, 64> Chess::getBoardArray() const
 
 bool Chess::canBitMoveFrom(Bit &bit, BitHolder &src)
 {
-    // need to implement friendly/unfriendly in bit so for now this hack
+    if (_promotionPending) return false;
     int currentPlayer = getCurrentPlayer()->playerNumber() * 128;
     int pieceColor = bit.gameTag() & 128;
     if (pieceColor == currentPlayer) return true;
@@ -642,6 +658,39 @@ bool Chess::canBitMoveFromTo(Bit &bit, BitHolder &src, BitHolder &dst)
     }
     
     return false;
+}
+
+void Chess::drawFrame()
+{
+    Game::drawFrame();
+
+    if (_promotionPending)
+        ImGui::OpenPopup("Pawn Promotion");
+
+    if (ImGui::BeginPopupModal("Pawn Promotion", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Promote pawn to:");
+        auto choose = [&](ChessPiece piece) {
+            promotePawn(_promotionSquare, _promotionPlayer, piece);
+            _promotionPending = false;
+            ImGui::CloseCurrentPopup();
+            endTurn();
+        };
+        if (ImGui::Button("Queen"))  choose(Queen);  ImGui::SameLine();
+        if (ImGui::Button("Rook"))   choose(Rook);   ImGui::SameLine();
+        if (ImGui::Button("Bishop")) choose(Bishop); ImGui::SameLine();
+        if (ImGui::Button("Knight")) choose(Knight);
+        ImGui::EndPopup();
+    }
+}
+
+void Chess::promotePawn(int square, int player, ChessPiece piece)
+{
+    ChessSquare* sq = _grid->getSquare(square % 8, square / 8);
+    sq->destroyBit();
+    Bit* newBit = PieceForPlayer(player, piece);
+    newBit->setGameTag(player == 0 ? piece : 128 + piece);
+    sq->setBit(newBit);
+    newBit->moveTo(sq->getPosition());
 }
 
 bool Chess::gameHasAI()
