@@ -56,7 +56,7 @@ Finish the chess program so it supports full legal chess movement rules (checks,
 - Use a simple heuristic (capture value, checks, promotions).
 
 ### ✅ Step 8: Integrate AI into game loop
-- Add UI/control to pick AI side (WHITE, BLACK, or none).
+- In the code, set the AI side to black and player to white
 - When it is the AI’s turn, call negamax search to pick best move.
 - Apply the chosen move and continue the game loop.
 - Ensure searching for depth 3 runs quickly (under a few seconds) for a standard mid-game position.

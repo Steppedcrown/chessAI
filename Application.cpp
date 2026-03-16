@@ -12,6 +12,7 @@ namespace ClassGame {
         Game *game = nullptr;
         bool gameOver = false;
         int gameWinner = -1;
+        int aiDepth = 3;
 
         //
         // game starting point
@@ -61,7 +62,24 @@ namespace ClassGame {
                         game = new Chess();
                         game->setUpBoard();
                     }
+                    ImGui::Separator();
+                    ImGui::SliderInt("AI Depth", &aiDepth, 1, 6);
+                    if (ImGui::Button("Start Chess vs AI (you play White)")) {
+                        game = new Chess();
+                        game->setUpBoard();
+                        game->setAIPlayer(1);
+                        game->_gameOptions.AIMAXDepth = aiDepth;
+                    }
+                    if (ImGui::Button("Start Chess vs AI (you play Black)")) {
+                        game = new Chess();
+                        game->setUpBoard();
+                        game->setAIPlayer(0);
+                        game->_gameOptions.AIMAXDepth = aiDepth;
+                    }
                 } else {
+                    if (game->gameHasAI()) {
+                        ImGui::SliderInt("AI Depth", &game->_gameOptions.AIMAXDepth, 1, 6);
+                    }
                     ImGui::Text("Current Player Number: %d", game->getCurrentPlayer()->playerNumber());
                     std::string stateString = game->stateString();
                     int stride = game->_gameOptions.rowX;

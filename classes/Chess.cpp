@@ -1,4 +1,5 @@
 #include "Chess.h"
+#include "ChessAI.h"
 #include <array>
 #include <limits>
 #include <cmath>
@@ -307,6 +308,7 @@ void Chess::setUpBoard()
 
     _moveList.clear();
     _moveCount = 0;
+    _gameOptions.AIMAXDepth = 3;
 
     startGame();
 }
@@ -640,6 +642,36 @@ bool Chess::canBitMoveFromTo(Bit &bit, BitHolder &src, BitHolder &dst)
     }
     
     return false;
+}
+
+bool Chess::gameHasAI()
+{
+    return _gameOptions.AIPlaying;
+}
+
+void Chess::updateAI()
+{
+    ChessAI::State state = ChessAI::fromChess(this);
+    auto moves = ChessAI::generateMoves(state);
+    if (moves.empty()) return; // checkmate or stalemate — EndOfTurn will catch it
+    BitMove best = ChessAI::getBestMove(state, _gameOptions.AIMAXDepth);
+    applyAIMove(best);
+}
+
+void Chess::applyAIMove(const BitMove& move)
+{
+    ChessSquare* srcSq = _grid->getSquare(move.from % 8, move.from / 8);
+    ChessSquare* dstSq = _grid->getSquare(move.to   % 8, move.to   / 8);
+    Bit* bit = srcSq->bit();
+    if (!bit) return;
+
+    // Change parent before clearing src so setBit(nullptr) won't delete the piece
+    bit->setParent(dstSq);
+    srcSq->setBit(nullptr);
+    dstSq->setBit(bit);         // deletes any captured piece, sets parent
+    bit->moveTo(dstSq->getPosition());
+
+    bitMovedFromTo(*bit, *srcSq, *dstSq);
 }
 
 void Chess::stopGame()

@@ -35,6 +35,9 @@ public:
 
     std::vector<BitMove> generateAllMoves();
 
+    bool gameHasAI() override;
+    void updateAI()  override;
+
     // Accessors for ChessAI
     std::array<int, 64> getBoardArray() const;
     bool getCanCastleKingSide(int player)  const { return _canCastleKingSide[player]; }
@@ -44,6 +47,8 @@ public:
     Grid* getGrid() override { return _grid; }
 
 private:
+    void applyAIMove(const BitMove& move);
+
     Bit* PieceForPlayer(const int playerNumber, ChessPiece piece);
     Player* ownerAt(int x, int y) const;
     void FENtoBoard(const std::string& fen);
