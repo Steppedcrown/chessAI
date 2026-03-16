@@ -3,6 +3,7 @@
 #include "Game.h"
 #include "Grid.h"
 #include "Bitboard.h"
+#include <array>
 #include <vector>
 
 constexpr int pieceSize = 80;
@@ -33,6 +34,12 @@ public:
     void setStateString(const std::string &s) override;
 
     std::vector<BitMove> generateAllMoves();
+
+    // Accessors for ChessAI
+    std::array<int, 64> getBoardArray() const;
+    bool getCanCastleKingSide(int player)  const { return _canCastleKingSide[player]; }
+    bool getCanCastleQueenSide(int player) const { return _canCastleQueenSide[player]; }
+    int  getEnPassantSquare()              const { return _enPassantSquare; }
 
     Grid* getGrid() override { return _grid; }
 

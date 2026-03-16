@@ -64,6 +64,7 @@ add_executable(demo Application.cpp
                           classes/Checkers.cpp
                           classes/Othello.cpp
                           classes/Chess.cpp
+                          classes/ChessAI.cpp
                           ${BCKD_FILE}
                           ${MAIN_FILE}
                           ${IMPL_FILE}

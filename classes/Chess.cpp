@@ -491,6 +491,11 @@ bool Chess::actionForEmptyHolder(BitHolder &holder)
     return false;
 }
 
+std::array<int, 64> Chess::getBoardArray() const
+{
+    return buildBoardArray(const_cast<Chess*>(this));
+}
+
 bool Chess::canBitMoveFrom(Bit &bit, BitHolder &src)
 {
     // need to implement friendly/unfriendly in bit so for now this hack
